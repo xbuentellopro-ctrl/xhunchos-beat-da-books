@@ -23,6 +23,46 @@ const SPORTS_CONFIG = [
     sportLabel: "NBA Summer League",
     markets: ["player_points", "player_rebounds", "player_assists", "player_threes"],
   },
+  {
+    sportKey: "soccer_usa_mls",
+    sportLabel: "MLS",
+    markets: ["player_shots_on_target", "player_shots", "player_assists"],
+  },
+  {
+    sportKey: "soccer_epl",
+    sportLabel: "EPL",
+    markets: ["player_shots_on_target", "player_shots", "player_assists"],
+  },
+  {
+    sportKey: "soccer_spain_la_liga",
+    sportLabel: "La Liga",
+    markets: ["player_shots_on_target", "player_shots", "player_assists"],
+  },
+  {
+    sportKey: "soccer_germany_bundesliga",
+    sportLabel: "Bundesliga",
+    markets: ["player_shots_on_target", "player_shots", "player_assists"],
+  },
+  {
+    sportKey: "soccer_italy_serie_a",
+    sportLabel: "Serie A",
+    markets: ["player_shots_on_target", "player_shots", "player_assists"],
+  },
+  {
+    sportKey: "soccer_france_ligue_one",
+    sportLabel: "Ligue 1",
+    markets: ["player_shots_on_target", "player_shots", "player_assists"],
+  },
+];
+    sportKey: "basketball_wnba",
+    sportLabel: "WNBA",
+    markets: ["player_points", "player_rebounds", "player_assists", "player_threes"],
+  },
+  {
+    sportKey: "basketball_nba_summer_league",
+    sportLabel: "NBA Summer League",
+    markets: ["player_points", "player_rebounds", "player_assists", "player_threes"],
+  },
 ];
 
 const SHARP_BOOKMAKERS = ["pinnacle", "fanduel", "draftkings"];
