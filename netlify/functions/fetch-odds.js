@@ -77,6 +77,8 @@ const STAT_LABELS = {
   batter_hits: "Hits",
   batter_total_bases: "Total Bases",
   batter_home_runs: "Home Runs",
+  player_shots_on_target: "Shots on Target",
+  player_shots: "Shots",
 };
 
 async function fetchJSON(url) {
