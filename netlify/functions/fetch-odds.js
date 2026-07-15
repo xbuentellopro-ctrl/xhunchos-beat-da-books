@@ -1,68 +1,3 @@
-// netlify/functions/fetch-odds.js
-// Scheduled Netlify function — pulls player prop odds from The Odds API,
-// de-vigs them, and upserts into Supabase. Events processed in parallel
-// to stay under the function execution time limit.
-
-const { createClient } = require("@supabase/supabase-js");
-const { devigTwoWay } = require("./devig");
-
-const ODDS_API_KEY = process.env.ODDS_API_KEY;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-
-const SPORTS_CONFIG = [
-  {
-    sportKey: "baseball_mlb",
-    sportLabel: "MLB",
-    markets: ["batter_hits", "batter_total_bases", "batter_home_runs"],
-  },
-  {
-    sportKey: "basketball_wnba",
-    sportLabel: "WNBA",
-    markets: ["player_points", "player_rebounds", "player_assists", "player_threes"],
-  },
-];
-
-const SHARP_BOOKMAKERS = ["pinnacle", "fanduel", "draftkings"];
-const DFS_BOOKMAKERS = ["prizepicks"];
-const ALL_BOOKMAKERS = [...SHARP_BOOKMAKERS, ...DFS_BOOKMAKERS].join(",");
-
-const STAT_LABELS = {
-  player_points: "Points",
-  player_rebounds: "Rebounds",
-  player_assists: "Assists",
-  player_threes: "3-Pointers Made",
-  batter_hits: "Hits",
-  batter_total_bases: "Total Bases",
-  batter_home_runs: "Home Runs",
-};
-
-async function fetchJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Odds API error ${res.status}: ${body}`);
-  }
-  return res.json();
-}
-
-async function processEvent(event, sportKey, sportLabel, markets) {
-  const oddsUrl =
-    `https://api.the-odds-api.com/v4/sports/${sportKey}/events/${event.id}/odds` +
-    `?apiKey=${ODDS_API_KEY}&bookmakers=${ALL_BOOKMAKERS}` +
-    `&markets=${markets.join(",")}&oddsFormat=american`;
-
-  let eventOdds;
-  try {
-    eventOdds = await
-cat > netlify/functions/fetch-odds.js << 'EOF'
-// netlify/functions/fetch-odds.js
-// Scheduled Netlify function — pulls player prop odds from The Odds API,
-// de-vigs them, and upserts into Supabase. Events processed in parallel
-// to stay under the function execution time limit.
-
 const { createClient } = require("@supabase/supabase-js");
 const { devigTwoWay } = require("./devig");
 
@@ -124,7 +59,6 @@ async function processEvent(event, sportKey, sportLabel, markets) {
   let sharpUpserts = 0;
   let ppUpserts = 0;
 
-  // Collect all upsert operations for this event, then run them concurrently
   const propWrites = [];
 
   for (const bookmaker of eventOdds.bookmakers || []) {
@@ -207,7 +141,6 @@ async function processSport({ sportKey, sportLabel, markets }) {
   const eventsUrl = `https://api.the-odds-api.com/v4/sports/${sportKey}/events?apiKey=${ODDS_API_KEY}`;
   const events = await fetchJSON(eventsUrl);
 
-  // Process all events for this sport concurrently
   const results = await Promise.all(
     events.map((event) => processEvent(event, sportKey, sportLabel, markets))
   );
@@ -231,7 +164,6 @@ exports.handler = async function () {
   const allDebug = [];
   const errors = [];
 
-  // Process both sports concurrently too
   const results = await Promise.allSettled(SPORTS_CONFIG.map((c) => processSport(c)));
 
   results.forEach((result, i) => {
