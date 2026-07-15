@@ -152,6 +152,7 @@ async function processSport({ sportKey, sportLabel, markets }) {
 
   const sharpUpserts = results.reduce((sum, r) => sum + (r.sharpUpserts || 0), 0);
   const ppUpserts = results.reduce((sum, r) => sum + (r.ppUpserts || 0), 0);
+  const bookmakersSeen = Array.from(new Set(results.flatMap((r) => r.bookmakersReturned || [])));
 
   return {
     sharpUpserts,
@@ -159,6 +160,7 @@ async function processSport({ sportKey, sportLabel, markets }) {
     debug: {
       eventsFound: events.length,
       eventSample: events.slice(0, 3).map((e) => `${e.away_team} @ ${e.home_team}`),
+      bookmakersSeen,
     },
   };
 }
