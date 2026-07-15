@@ -54,7 +54,7 @@ const SPORTS_CONFIG = [
     markets: ["player_shots_on_target", "player_shots", "player_assists"],
   },
 ];
-    sportKey: "basketball_wnba",
+   sportKey: "basketball_wnba",
     sportLabel: "WNBA",
     markets: ["player_points", "player_rebounds", "player_assists", "player_threes"],
   },
@@ -63,6 +63,7 @@ const SPORTS_CONFIG = [
     sportLabel: "NBA Summer League",
     markets: ["player_points", "player_rebounds", "player_assists", "player_threes"],
   },
+];
 ];
 
 const SHARP_BOOKMAKERS = ["pinnacle", "fanduel", "draftkings"];
