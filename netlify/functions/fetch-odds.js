@@ -11,12 +11,17 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-// NBA is off-season (Jul-Sep) — using MLB to confirm the pipeline works with live data.
+// NBA is off-season (Jul-Sep). WNBA season (May-Sep) and MLB are both live right now.
 const SPORTS_CONFIG = [
   {
     sportKey: "baseball_mlb",
     sportLabel: "MLB",
     markets: ["batter_hits", "batter_total_bases", "batter_home_runs"],
+  },
+  {
+    sportKey: "basketball_wnba",
+    sportLabel: "WNBA",
+    markets: ["player_points", "player_rebounds", "player_assists", "player_threes"],
   },
 ];
 
@@ -25,6 +30,10 @@ const DFS_BOOKMAKERS = ["prizepicks"];
 const ALL_BOOKMAKERS = [...SHARP_BOOKMAKERS, ...DFS_BOOKMAKERS].join(",");
 
 const STAT_LABELS = {
+  player_points: "Points",
+  player_rebounds: "Rebounds",
+  player_assists: "Assists",
+  player_threes: "3-Pointers Made",
   batter_hits: "Hits",
   batter_total_bases: "Total Bases",
   batter_home_runs: "Home Runs",
@@ -49,7 +58,8 @@ async function processSport({ sportKey, sportLabel, markets }) {
     bookmakersSeenPerEvent: [],
   };
 
-  let upserts = 0;
+  let sharpUpserts = 0;
+  let ppUpserts = 0;
 
   for (const event of events) {
     const oddsUrl =
@@ -102,10 +112,11 @@ async function processSport({ sportKey, sportLabel, markets }) {
           if (bookmaker.key === "prizepicks") {
             const line = sides.over?.point ?? sides.under?.point;
             if (line == null) continue;
-            await supabase.from("pp_lines").upsert(
+            const { error: ppErr } = await supabase.from("pp_lines").upsert(
               { prop_id: propRow.id, pp_line: line, updated_at: new Date().toISOString() },
               { onConflict: "prop_id" }
             );
+            if (!ppErr) ppUpserts++;
             continue;
           }
 
@@ -127,24 +138,26 @@ async function processSport({ sportKey, sportLabel, markets }) {
             { onConflict: "prop_id,bookmaker" }
           );
 
-          if (!oddsErr) upserts++;
+          if (!oddsErr) sharpUpserts++;
         }
       }
     }
   }
 
-  return { upserts, debug };
+  return { sharpUpserts, ppUpserts, debug };
 }
 
 exports.handler = async function () {
-  let totalUpserts = 0;
+  let totalSharp = 0;
+  let totalPP = 0;
   const allDebug = [];
   const errors = [];
 
   for (const config of SPORTS_CONFIG) {
     try {
       const result = await processSport(config);
-      totalUpserts += result.upserts;
+      totalSharp += result.sharpUpserts;
+      totalPP += result.ppUpserts;
       allDebug.push({ sport: config.sportLabel, ...result.debug });
     } catch (err) {
       errors.push(`${config.sportLabel}: ${err.message}`);
@@ -154,7 +167,7 @@ exports.handler = async function () {
   return {
     statusCode: 200,
     body: JSON.stringify({
-      message: `Upserted ${totalUpserts} odds rows`,
+      message: `Upserted ${totalSharp} sharp-book odds rows, ${totalPP} PrizePicks lines`,
       debug: allDebug,
       errors,
     }, null, 2),
