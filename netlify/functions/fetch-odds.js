@@ -197,6 +197,7 @@ async function processSport({ sportKey, sportLabel, markets }) {
       sampleErrors,
     },
   };
+}
 
 exports.handler = async function () {
   let totalSharp = 0;
