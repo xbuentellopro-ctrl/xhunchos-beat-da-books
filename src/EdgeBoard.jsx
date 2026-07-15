@@ -1,23 +1,12 @@
-import React, { useState, useMemo } from "react";
-import { TrendingUp, TrendingDown, Search, ChevronUp, ChevronDown, Zap } from "lucide-react";
+import React, { useState, useMemo, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
+import { TrendingUp, TrendingDown, Search, ChevronUp, ChevronDown, Zap, Loader2 } from "lucide-react";
 
-// ---------- Mock data (this is where live PrizePicks + sportsbook feeds will plug in) ----------
-const MOCK_PROPS = [
-  { id: 1, player: "L. James", team: "LAL", sport: "NBA", stat: "Points", ppLine: 27.5, side: "Over", americanOdds: -108, bookNoVig: 0.582, book: "Pinnacle" },
-  { id: 2, player: "S. Curry", team: "GSW", sport: "NBA", stat: "3-Pointers Made", ppLine: 4.5, side: "Over", americanOdds: -122, bookNoVig: 0.548, book: "Circa" },
-  { id: 3, player: "N. Jokic", team: "DEN", sport: "NBA", stat: "Rebounds", ppLine: 11.5, side: "Under", americanOdds: -115, bookNoVig: 0.512, book: "Pinnacle" },
-  { id: 4, player: "P. Mahomes", team: "KC", sport: "NFL", stat: "Passing Yards", ppLine: 268.5, side: "Over", americanOdds: -105, bookNoVig: 0.601, book: "Circa" },
-  { id: 5, player: "T. Kelce", team: "KC", sport: "NFL", stat: "Receptions", ppLine: 6.5, side: "Over", americanOdds: -130, bookNoVig: 0.539, book: "Pinnacle" },
-  { id: 6, player: "J. Tatum", team: "BOS", sport: "NBA", stat: "Points", ppLine: 29.5, side: "Under", americanOdds: -110, bookNoVig: 0.497, book: "Circa" },
-  { id: 7, player: "A. Judge", team: "NYY", sport: "MLB", stat: "Total Bases", ppLine: 1.5, side: "Over", americanOdds: -118, bookNoVig: 0.573, book: "Pinnacle" },
-  { id: 8, player: "S. Gilgeous-Alexander", team: "OKC", sport: "NBA", stat: "Assists", ppLine: 6.5, side: "Over", americanOdds: -102, bookNoVig: 0.556, book: "Circa" },
-  { id: 9, player: "C. McCaffrey", team: "SF", sport: "NFL", stat: "Rush + Rec Yards", ppLine: 112.5, side: "Over", americanOdds: -112, bookNoVig: 0.521, book: "Pinnacle" },
-  { id: 10, player: "L. Doncic", team: "DAL", sport: "NBA", stat: "Points", ppLine: 31.5, side: "Over", americanOdds: -109, bookNoVig: 0.612, book: "Circa" },
-  { id: 11, player: "V. Wembanyama", team: "SAS", sport: "NBA", stat: "Blocks", ppLine: 2.5, side: "Over", americanOdds: -125, bookNoVig: 0.529, book: "Pinnacle" },
-  { id: 12, player: "M. Betts", team: "LAD", sport: "MLB", stat: "Hits", ppLine: 1.5, side: "Under", americanOdds: -103, bookNoVig: 0.487, book: "Circa" },
-];
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
-// Real PrizePicks standard payout multipliers (verified against prizepicks.com/help-center/payouts, mid-2026)
 const POWER_MULTIPLIERS = {
   2: { 2: 3.0 },
   3: { 3: 6.0 },
@@ -39,7 +28,6 @@ function combinations(n, k) {
   return r;
 }
 
-// Solve for breakeven per-leg win probability via bisection on expected value
 function breakevenProb(n, payouts) {
   const ev = (p) => {
     let total = 0;
@@ -50,8 +38,7 @@ function breakevenProb(n, payouts) {
     }
     return total - 1;
   };
-  let lo = 0.01,
-    hi = 0.99;
+  let lo = 0.01, hi = 0.99;
   for (let i = 0; i < 60; i++) {
     const mid = (lo + hi) / 2;
     if (ev(mid) > 0) hi = mid;
@@ -60,7 +47,6 @@ function breakevenProb(n, payouts) {
   return (lo + hi) / 2;
 }
 
-// Precomputed breakeven table (verified: matches published figures, e.g. 2-pick Power 57.74%, 6-pick Flex 54.21%)
 const BREAKEVEN = { power: {}, flex: {} };
 Object.entries(POWER_MULTIPLIERS).forEach(([n, payouts]) => {
   BREAKEVEN.power[n] = breakevenProb(Number(n), payouts);
@@ -74,11 +60,39 @@ function calcEdge(bookNoVig, entrySize, playType) {
   return (bookNoVig - breakeven) * 100;
 }
 
-const SPORT_COLORS = {
-  NBA: "#C9A24B",
-  NFL: "#3ECF8E",
-  MLB: "#7DA7D9",
-};
+const SPORT_COLORS = { NBA: "#C9A24B", NFL: "#3ECF8E", MLB: "#7DA7D9", WNBA: "#E88AB5" };
+const BOOK_PRIORITY = ["pinnacle", "fanduel", "draftkings"];
+
+function transformRows(rawProps) {
+  const rows = [];
+  for (const prop of rawProps) {
+    const ppLine = prop.pp_lines?.[0]?.pp_line;
+    if (ppLine == null) continue;
+    if (!prop.sportsbook_odds || prop.sportsbook_odds.length === 0) continue;
+    let chosen = null;
+    for (const bookKey of BOOK_PRIORITY) {
+      chosen = prop.sportsbook_odds.find((o) => o.bookmaker === bookKey);
+      if (chosen) break;
+    }
+    if (!chosen) chosen = prop.sportsbook_odds[0];
+    const overProb = chosen.over_fair_prob;
+    const underProb = chosen.under_fair_prob;
+    const side = overProb >= underProb ? "Over" : "Under";
+    const bookNoVig = side === "Over" ? overProb : underProb;
+    rows.push({
+      id: prop.id,
+      player: prop.player,
+      team: prop.team || "",
+      sport: prop.sport,
+      stat: prop.stat,
+      ppLine,
+      side,
+      bookNoVig,
+      book: chosen.bookmaker.charAt(0).toUpperCase() + chosen.bookmaker.slice(1),
+    });
+  }
+  return rows;
+}
 
 export default function EdgeBoard() {
   const [playType, setPlayType] = useState("flex");
@@ -87,42 +101,67 @@ export default function EdgeBoard() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("edge");
   const [sortDir, setSortDir] = useState("desc");
+  const [rawProps, setRawProps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [lastFetched, setLastFetched] = useState(null);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadProps() {
+      setLoading(true);
+      setLoadError(null);
+      const { data, error } = await supabase
+        .from("props")
+        .select(`
+          id, player, team, sport, stat, commence_time,
+          pp_lines ( pp_line ),
+          sportsbook_odds ( bookmaker, over_fair_prob, under_fair_prob )
+        `)
+        .order("commence_time", { ascending: true })
+        .limit(500);
+      if (cancelled) return;
+      if (error) {
+        setLoadError(error.message);
+        setLoading(false);
+        return;
+      }
+      setRawProps(data || []);
+      setLastFetched(new Date());
+      setLoading(false);
+    }
+    loadProps();
+    const interval = setInterval(loadProps, 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const baseRows = useMemo(() => transformRows(rawProps), [rawProps]);
   const availableSizes = playType === "power" ? [2, 3, 4, 5, 6] : [3, 4, 5, 6];
 
   const rows = useMemo(() => {
-    let data = MOCK_PROPS.map((p) => ({
-      ...p,
-      edge: calcEdge(p.bookNoVig, entrySize, playType),
-    }));
-
+    let data = baseRows.map((p) => ({ ...p, edge: calcEdge(p.bookNoVig, entrySize, playType) }));
     if (sportFilter !== "ALL") data = data.filter((p) => p.sport === sportFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       data = data.filter((p) => p.player.toLowerCase().includes(q) || p.team.toLowerCase().includes(q));
     }
-
     data.sort((a, b) => {
-      let av = a[sortKey];
-      let bv = b[sortKey];
+      let av = a[sortKey], bv = b[sortKey];
       if (typeof av === "string") {
-        av = av.toLowerCase();
-        bv = bv.toLowerCase();
+        av = av.toLowerCase(); bv = bv.toLowerCase();
         return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
       }
       return sortDir === "asc" ? av - bv : bv - av;
     });
-
     return data;
-  }, [entrySize, sportFilter, search, sortKey, sortDir]);
+  }, [baseRows, entrySize, sportFilter, search, sortKey, sortDir, playType]);
 
   const topEdges = useMemo(
-    () =>
-      [...MOCK_PROPS]
-        .map((p) => ({ ...p, edge: calcEdge(p.bookNoVig, entrySize, playType) }))
-        .sort((a, b) => b.edge - a.edge)
-        .slice(0, 8),
-    [entrySize, playType]
+    () => baseRows.map((p) => ({ ...p, edge: calcEdge(p.bookNoVig, entrySize, playType) })).sort((a, b) => b.edge - a.edge).slice(0, 8),
+    [baseRows, entrySize, playType]
   );
 
   const handlePlayType = (type) => {
@@ -132,105 +171,45 @@ export default function EdgeBoard() {
   };
 
   const toggleSort = (key) => {
-    if (sortKey === key) {
-      setSortDir(sortDir === "asc" ? "desc" : "asc");
-    } else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
+    if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("desc"); }
   };
 
-  const sports = ["ALL", ...Array.from(new Set(MOCK_PROPS.map((p) => p.sport)))];
+  const sports = ["ALL", ...Array.from(new Set(baseRows.map((p) => p.sport)))];
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#0A0B0D",
-        color: "#EDEAE2",
-        fontFamily: "'Inter', system-ui, sans-serif",
-      }}
-    >
+    <div style={{ minHeight: "100vh", background: "#0A0B0D", color: "#EDEAE2", fontFamily: "'Inter', system-ui, sans-serif" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
         .oswald { font-family: 'Oswald', sans-serif; }
         .mono { font-family: 'JetBrains Mono', monospace; }
-        @keyframes ticker {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-        .ticker-track {
-          display: flex;
-          width: max-content;
-          animation: ticker 38s linear infinite;
-        }
+        @keyframes ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spin { animation: spin 1s linear infinite; }
+        .ticker-track { display: flex; width: max-content; animation: ticker 38s linear infinite; }
         .ticker-track:hover { animation-play-state: paused; }
-        .led-glow-pos {
-          text-shadow: 0 0 8px rgba(62,207,142,0.65), 0 0 2px rgba(62,207,142,0.9);
-        }
-        .led-glow-neg {
-          text-shadow: 0 0 6px rgba(229,72,77,0.35);
-        }
+        .led-glow-pos { text-shadow: 0 0 8px rgba(62,207,142,0.65), 0 0 2px rgba(62,207,142,0.9); }
+        .led-glow-neg { text-shadow: 0 0 6px rgba(229,72,77,0.35); }
         .row-hover:hover { background: rgba(201,162,75,0.06); }
-        .felt-border {
-          border: 1px solid rgba(201,162,75,0.25);
-        }
+        .felt-border { border: 1px solid rgba(201,162,75,0.25); }
         ::selection { background: #C9A24B; color: #0A0B0D; }
       `}</style>
 
-      {/* Header */}
-      <header
-        style={{
-          borderBottom: "1px solid rgba(201,162,75,0.25)",
-          background: "linear-gradient(180deg, #0E3B2E 0%, #0A0B0D 100%)",
-          padding: "20px 28px 16px",
-        }}
-      >
+      <header style={{ borderBottom: "1px solid rgba(201,162,75,0.25)", background: "linear-gradient(180deg, #0E3B2E 0%, #0A0B0D 100%)", padding: "20px 28px 16px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 6,
-                background: "#C9A24B",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
+            <div style={{ width: 34, height: 34, borderRadius: 6, background: "#C9A24B", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Zap size={19} color="#0A0B0D" strokeWidth={2.5} />
             </div>
             <div>
-              <h1 className="oswald" style={{ fontSize: 22, fontWeight: 700, letterSpacing: 1, margin: 0, textTransform: "uppercase" }}>
-                XHuncho's Beat Da Books
-              </h1>
-              <p style={{ fontSize: 11.5, color: "#9A9689", margin: 0, letterSpacing: 0.3 }}>
-                PrizePicks lines vs. sharp no-vig probability
-              </p>
+              <h1 className="oswald" style={{ fontSize: 22, fontWeight: 700, letterSpacing: 1, margin: 0, textTransform: "uppercase" }}>XHuncho's Beat Da Books</h1>
+              <p style={{ fontSize: 11.5, color: "#9A9689", margin: 0, letterSpacing: 0.3 }}>PrizePicks lines vs. sharp no-vig probability</p>
             </div>
           </div>
-
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {["power", "flex"].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => handlePlayType(t)}
-                  className="oswald"
-                  style={{
-                    padding: "6px 13px",
-                    borderRadius: 5,
-                    border: playType === t ? "1px solid #C9A24B" : "1px solid rgba(201,162,75,0.25)",
-                    background: playType === t ? "rgba(201,162,75,0.15)" : "transparent",
-                    color: playType === t ? "#C9A24B" : "#9A9689",
-                    fontWeight: 600,
-                    fontSize: 12,
-                    letterSpacing: 0.6,
-                    textTransform: "uppercase",
-                    cursor: "pointer",
-                  }}
-                >
+                <button key={t} onClick={() => handlePlayType(t)} className="oswald" style={{ padding: "6px 13px", borderRadius: 5, border: playType === t ? "1px solid #C9A24B" : "1px solid rgba(201,162,75,0.25)", background: playType === t ? "rgba(201,162,75,0.15)" : "transparent", color: playType === t ? "#C9A24B" : "#9A9689", fontWeight: 600, fontSize: 12, letterSpacing: 0.6, textTransform: "uppercase", cursor: "pointer" }}>
                   {t === "power" ? "Power Play" : "Flex Play"}
                 </button>
               ))}
@@ -238,23 +217,7 @@ export default function EdgeBoard() {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 11, color: "#9A9689", textTransform: "uppercase", letterSpacing: 0.5 }}>Picks</span>
               {availableSizes.map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setEntrySize(n)}
-                  className="mono"
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 5,
-                    border: entrySize === n ? "1px solid #C9A24B" : "1px solid rgba(201,162,75,0.25)",
-                    background: entrySize === n ? "rgba(201,162,75,0.15)" : "transparent",
-                    color: entrySize === n ? "#C9A24B" : "#9A9689",
-                    fontWeight: 600,
-                    fontSize: 13,
-                    cursor: "pointer",
-                    transition: "all 0.15s",
-                  }}
-                >
+                <button key={n} onClick={() => setEntrySize(n)} className="mono" style={{ width: 32, height: 32, borderRadius: 5, border: entrySize === n ? "1px solid #C9A24B" : "1px solid rgba(201,162,75,0.25)", background: entrySize === n ? "rgba(201,162,75,0.15)" : "transparent", color: entrySize === n ? "#C9A24B" : "#9A9689", fontWeight: 600, fontSize: 13, cursor: "pointer", transition: "all 0.15s" }}>
                   {n}
                 </button>
               ))}
@@ -263,123 +226,60 @@ export default function EdgeBoard() {
         </div>
       </header>
 
-      {/* Ticker */}
-      <div
-        style={{
-          borderBottom: "1px solid rgba(201,162,75,0.2)",
-          background: "#0D1210",
-          overflow: "hidden",
-          padding: "9px 0",
-        }}
-      >
-        <div className="ticker-track">
-          {[...topEdges, ...topEdges].map((p, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 22px", whiteSpace: "nowrap" }}>
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: SPORT_COLORS[p.sport],
-                  display: "inline-block",
-                }}
-              />
-              <span className="mono" style={{ fontSize: 12.5, color: "#EDEAE2" }}>
-                {p.player} <span style={{ color: "#9A9689" }}>{p.side} {p.ppLine}</span>
-              </span>
-              <span
-                className={`mono ${p.edge >= 0 ? "led-glow-pos" : "led-glow-neg"}`}
-                style={{ fontSize: 12.5, fontWeight: 700, color: p.edge >= 0 ? "#3ECF8E" : "#E5484D" }}
-              >
-                {p.edge >= 0 ? "+" : ""}{p.edge.toFixed(1)}%
-              </span>
-            </div>
-          ))}
-        </div>
+      <div style={{ borderBottom: "1px solid rgba(201,162,75,0.2)", background: "#0D1210", overflow: "hidden", padding: "9px 0", minHeight: 34 }}>
+        {topEdges.length > 0 ? (
+          <div className="ticker-track">
+            {[...topEdges, ...topEdges].map((p, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 22px", whiteSpace: "nowrap" }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: SPORT_COLORS[p.sport] || "#9A9689", display: "inline-block" }} />
+                <span className="mono" style={{ fontSize: 12.5, color: "#EDEAE2" }}>{p.player} <span style={{ color: "#9A9689" }}>{p.side} {p.ppLine}</span></span>
+                <span className={`mono ${p.edge >= 0 ? "led-glow-pos" : "led-glow-neg"}`} style={{ fontSize: 12.5, fontWeight: 700, color: p.edge >= 0 ? "#3ECF8E" : "#E5484D" }}>{p.edge >= 0 ? "+" : ""}{p.edge.toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ padding: "0 22px", fontSize: 12, color: "#6B6858" }} className="mono">
+            {loading ? "Loading live props..." : "No props with both a PrizePicks line and sportsbook odds yet."}
+          </div>
+        )}
       </div>
 
-      {/* Controls */}
       <div style={{ padding: "20px 28px 0", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ position: "relative" }}>
           <Search size={15} color="#9A9689" style={{ position: "absolute", left: 11, top: 10 }} />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search player or team"
-            className="mono"
-            style={{
-              background: "#12141A",
-              border: "1px solid rgba(201,162,75,0.25)",
-              borderRadius: 6,
-              padding: "8px 12px 8px 32px",
-              color: "#EDEAE2",
-              fontSize: 13,
-              width: 220,
-              outline: "none",
-            }}
-          />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search player or team" className="mono" style={{ background: "#12141A", border: "1px solid rgba(201,162,75,0.25)", borderRadius: 6, padding: "8px 12px 8px 32px", color: "#EDEAE2", fontSize: 13, width: 220, outline: "none" }} />
         </div>
         {sports.map((s) => (
-          <button
-            key={s}
-            onClick={() => setSportFilter(s)}
-            style={{
-              padding: "7px 14px",
-              borderRadius: 6,
-              border: sportFilter === s ? "1px solid #C9A24B" : "1px solid rgba(201,162,75,0.2)",
-              background: sportFilter === s ? "rgba(201,162,75,0.15)" : "transparent",
-              color: sportFilter === s ? "#C9A24B" : "#9A9689",
-              fontSize: 12.5,
-              fontWeight: 600,
-              cursor: "pointer",
-              letterSpacing: 0.3,
-            }}
-          >
+          <button key={s} onClick={() => setSportFilter(s)} style={{ padding: "7px 14px", borderRadius: 6, border: sportFilter === s ? "1px solid #C9A24B" : "1px solid rgba(201,162,75,0.2)", background: sportFilter === s ? "rgba(201,162,75,0.15)" : "transparent", color: sportFilter === s ? "#C9A24B" : "#9A9689", fontSize: 12.5, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3 }}>
             {s}
           </button>
         ))}
-        <span style={{ marginLeft: "auto", fontSize: 11.5, color: "#6B6858" }} className="mono">
+        <span style={{ marginLeft: "auto", fontSize: 11.5, color: "#6B6858", display: "flex", alignItems: "center", gap: 6 }} className="mono">
+          {loading && <Loader2 size={12} className="spin" />}
           {rows.length} props · breakeven {(BREAKEVEN[playType][entrySize] * 100).toFixed(2)}% at {entrySize}-pick {playType === "power" ? "Power" : "Flex"}
+          {lastFetched && ` · updated ${lastFetched.toLocaleTimeString()}`}
         </span>
       </div>
 
-      {/* Table */}
       <div style={{ padding: "16px 28px 40px" }}>
+        {loadError && (
+          <div style={{ background: "rgba(229,72,77,0.1)", border: "1px solid rgba(229,72,77,0.3)", borderRadius: 8, padding: "12px 16px", marginBottom: 14, fontSize: 13, color: "#E5484D" }}>
+            Couldn't load live props: {loadError}
+          </div>
+        )}
         <div className="felt-border" style={{ borderRadius: 10, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#12141A", borderBottom: "1px solid rgba(201,162,75,0.25)" }}>
                 {[
-                  { key: "player", label: "Player" },
-                  { key: "sport", label: "Sport" },
-                  { key: "stat", label: "Prop" },
-                  { key: "ppLine", label: "PP Line" },
-                  { key: "side", label: "Side" },
-                  { key: "bookNoVig", label: "Fair %" },
-                  { key: "book", label: "Source" },
-                  { key: "edge", label: "Edge" },
+                  { key: "player", label: "Player" }, { key: "sport", label: "Sport" }, { key: "stat", label: "Prop" },
+                  { key: "ppLine", label: "PP Line" }, { key: "side", label: "Side" }, { key: "bookNoVig", label: "Fair %" },
+                  { key: "book", label: "Source" }, { key: "edge", label: "Edge" },
                 ].map((col) => (
-                  <th
-                    key={col.key}
-                    onClick={() => toggleSort(col.key)}
-                    className="oswald"
-                    style={{
-                      padding: "12px 16px",
-                      textAlign: col.key === "edge" ? "right" : "left",
-                      fontSize: 11.5,
-                      fontWeight: 600,
-                      letterSpacing: 0.8,
-                      textTransform: "uppercase",
-                      color: "#9A9689",
-                      cursor: "pointer",
-                      userSelect: "none",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
+                  <th key={col.key} onClick={() => toggleSort(col.key)} className="oswald" style={{ padding: "12px 16px", textAlign: col.key === "edge" ? "right" : "left", fontSize: 11.5, fontWeight: 600, letterSpacing: 0.8, textTransform: "uppercase", color: "#9A9689", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
                       {col.label}
-                      {sortKey === col.key &&
-                        (sortDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+                      {sortKey === col.key && (sortDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
                     </span>
                   </th>
                 ))}
@@ -390,76 +290,37 @@ export default function EdgeBoard() {
                 <tr key={p.id} className="row-hover" style={{ borderBottom: "1px solid rgba(201,162,75,0.1)" }}>
                   <td style={{ padding: "13px 16px" }}>
                     <div style={{ fontWeight: 600, fontSize: 13.5 }}>{p.player}</div>
-                    <div className="mono" style={{ fontSize: 11, color: "#6B6858" }}>{p.team}</div>
+                    {p.team && <div className="mono" style={{ fontSize: 11, color: "#6B6858" }}>{p.team}</div>}
                   </td>
                   <td style={{ padding: "13px 16px" }}>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: SPORT_COLORS[p.sport],
-                        border: `1px solid ${SPORT_COLORS[p.sport]}55`,
-                        borderRadius: 4,
-                        padding: "2px 7px",
-                      }}
-                    >
-                      {p.sport}
-                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: SPORT_COLORS[p.sport] || "#9A9689", border: `1px solid ${(SPORT_COLORS[p.sport] || "#9A9689")}55`, borderRadius: 4, padding: "2px 7px" }}>{p.sport}</span>
                   </td>
                   <td style={{ padding: "13px 16px", fontSize: 13, color: "#C4C0B4" }}>{p.stat}</td>
-                  <td className="mono" style={{ padding: "13px 16px", fontSize: 13.5, fontWeight: 600 }}>
-                    {p.ppLine}
-                  </td>
+                  <td className="mono" style={{ padding: "13px 16px", fontSize: 13.5, fontWeight: 600 }}>{p.ppLine}</td>
                   <td style={{ padding: "13px 16px" }}>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: p.side === "Over" ? "#3ECF8E" : "#E5484D",
-                      }}
-                    >
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: p.side === "Over" ? "#3ECF8E" : "#E5484D" }}>
                       {p.side === "Over" ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
                       {p.side}
                     </span>
                   </td>
-                  <td className="mono" style={{ padding: "13px 16px", fontSize: 13, color: "#C4C0B4" }}>
-                    {(p.bookNoVig * 100).toFixed(1)}%
-                  </td>
+                  <td className="mono" style={{ padding: "13px 16px", fontSize: 13, color: "#C4C0B4" }}>{(p.bookNoVig * 100).toFixed(1)}%</td>
                   <td style={{ padding: "13px 16px", fontSize: 12, color: "#6B6858" }}>{p.book}</td>
-                  <td
-                    className={`mono ${p.edge >= 0 ? "led-glow-pos" : "led-glow-neg"}`}
-                    style={{
-                      padding: "13px 16px",
-                      textAlign: "right",
-                      fontSize: 15,
-                      fontWeight: 700,
-                      color: p.edge >= 0 ? "#3ECF8E" : "#E5484D",
-                    }}
-                  >
-                    {p.edge >= 0 ? "+" : ""}
-                    {p.edge.toFixed(1)}%
+                  <td className={`mono ${p.edge >= 0 ? "led-glow-pos" : "led-glow-neg"}`} style={{ padding: "13px 16px", textAlign: "right", fontSize: 15, fontWeight: 700, color: p.edge >= 0 ? "#3ECF8E" : "#E5484D" }}>
+                    {p.edge >= 0 ? "+" : ""}{p.edge.toFixed(1)}%
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={8} style={{ padding: 32, textAlign: "center", color: "#6B6858", fontSize: 13 }}>
-                    No props match these filters.
-                  </td>
-                </tr>
+              {rows.length === 0 && !loading && (
+                <tr><td colSpan={8} style={{ padding: 32, textAlign: "center", color: "#6B6858", fontSize: 13 }}>No props match these filters yet. Sharp books often post lines closer to game time — check back nearer to first pitch/tip-off.</td></tr>
+              )}
+              {loading && rows.length === 0 && (
+                <tr><td colSpan={8} style={{ padding: 32, textAlign: "center", color: "#6B6858", fontSize: 13 }}>Loading live props from Supabase...</td></tr>
               )}
             </tbody>
           </table>
         </div>
-
         <p style={{ marginTop: 14, fontSize: 11.5, color: "#6B6858", lineHeight: 1.6 }}>
-          Props shown are mock data. Breakeven math uses PrizePicks' real standard payout multipliers
-          (verified against prizepicks.com) run through binomial expected-value calculations — not a flat
-          estimate. Fair % is the sharp-book no-vig implied probability; Edge = Fair % minus the breakeven
-          win rate required per leg at the selected play type and entry size. Live odds feed is the next step.
+          Live data from The Odds API (PrizePicks lines + Pinnacle/FanDuel/DraftKings fair pricing), refreshed on a schedule via a Netlify function. Breakeven math uses PrizePicks' real standard payout multipliers run through binomial expected-value calculations. Edge = Fair % minus the breakeven win rate required per leg at the selected play type and entry size.
         </p>
       </div>
     </div>
