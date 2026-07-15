@@ -1,11 +1,6 @@
 // netlify/functions/fetch-odds.js
 // Scheduled Netlify function — pulls player prop odds from The Odds API,
-// de-vigs them, and upserts into Supabase. Mirrors the send-reminders.js pattern.
-//
-// Netlify scheduled function config (netlify.toml):
-//   [[scheduled.functions]]
-//     function = "fetch-odds"
-//     cron = "0 */2 * * *"   # every 2 hours — tune based on your quota
+// de-vigs them, and upserts into Supabase.
 
 const { createClient } = require("@supabase/supabase-js");
 const { devigTwoWay } = require("./devig");
@@ -17,7 +12,6 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // NBA is off-season (Jul-Sep) — using MLB to confirm the pipeline works with live data.
-// Swap back to basketball_nba once the season resumes in October.
 const SPORTS_CONFIG = [
   {
     sportKey: "baseball_mlb",
@@ -31,13 +25,6 @@ const DFS_BOOKMAKERS = ["prizepicks"];
 const ALL_BOOKMAKERS = [...SHARP_BOOKMAKERS, ...DFS_BOOKMAKERS].join(",");
 
 const STAT_LABELS = {
-  player_points: "Points",
-  player_rebounds: "Rebounds",
-  player_assists: "Assists",
-  player_threes: "3-Pointers Made",
-  player_pass_yds: "Passing Yards",
-  player_reception_yds: "Receiving Yards",
-  player_receptions: "Receptions",
   batter_hits: "Hits",
   batter_total_bases: "Total Bases",
   batter_home_runs: "Home Runs",
@@ -56,6 +43,12 @@ async function processSport({ sportKey, sportLabel, markets }) {
   const eventsUrl = `https://api.the-odds-api.com/v4/sports/${sportKey}/events?apiKey=${ODDS_API_KEY}`;
   const events = await fetchJSON(eventsUrl);
 
+  const debug = {
+    eventsFound: events.length,
+    eventSample: events.slice(0, 3).map((e) => `${e.away_team} @ ${e.home_team} (${e.commence_time})`),
+    bookmakersSeenPerEvent: [],
+  };
+
   let upserts = 0;
 
   for (const event of events) {
@@ -68,9 +61,14 @@ async function processSport({ sportKey, sportLabel, markets }) {
     try {
       eventOdds = await fetchJSON(oddsUrl);
     } catch (err) {
-      console.error(`Skipping event ${event.id} (${event.home_team} vs ${event.away_team}):`, err.message);
+      debug.bookmakersSeenPerEvent.push({ event: event.id, error: err.message });
       continue;
     }
+
+    debug.bookmakersSeenPerEvent.push({
+      event: `${event.away_team} @ ${event.home_team}`,
+      bookmakersReturned: (eventOdds.bookmakers || []).map((b) => b.key),
+    });
 
     for (const bookmaker of eventOdds.bookmakers || []) {
       for (const market of bookmaker.markets || []) {
@@ -99,24 +97,15 @@ async function processSport({ sportKey, sportLabel, markets }) {
             .select()
             .single();
 
-          if (propErr) {
-            console.error("prop upsert failed:", propErr.message);
-            continue;
-          }
+          if (propErr) continue;
 
           if (bookmaker.key === "prizepicks") {
             const line = sides.over?.point ?? sides.under?.point;
             if (line == null) continue;
-
-            const { error: ppErr } = await supabase.from("pp_lines").upsert(
-              {
-                prop_id: propRow.id,
-                pp_line: line,
-                updated_at: new Date().toISOString(),
-              },
+            await supabase.from("pp_lines").upsert(
+              { prop_id: propRow.id, pp_line: line, updated_at: new Date().toISOString() },
               { onConflict: "prop_id" }
             );
-            if (ppErr) console.error("pp_lines upsert failed:", ppErr.message);
             continue;
           }
 
@@ -138,27 +127,25 @@ async function processSport({ sportKey, sportLabel, markets }) {
             { onConflict: "prop_id,bookmaker" }
           );
 
-          if (oddsErr) {
-            console.error("odds upsert failed:", oddsErr.message);
-            continue;
-          }
-
-          upserts++;
+          if (!oddsErr) upserts++;
         }
       }
     }
   }
 
-  return upserts;
+  return { upserts, debug };
 }
 
 exports.handler = async function () {
   let totalUpserts = 0;
+  const allDebug = [];
   const errors = [];
 
   for (const config of SPORTS_CONFIG) {
     try {
-      totalUpserts += await processSport(config);
+      const result = await processSport(config);
+      totalUpserts += result.upserts;
+      allDebug.push({ sport: config.sportLabel, ...result.debug });
     } catch (err) {
       errors.push(`${config.sportLabel}: ${err.message}`);
     }
@@ -168,7 +155,8 @@ exports.handler = async function () {
     statusCode: 200,
     body: JSON.stringify({
       message: `Upserted ${totalUpserts} odds rows`,
+      debug: allDebug,
       errors,
-    }),
+    }, null, 2),
   };
 };
