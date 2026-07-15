@@ -174,12 +174,25 @@ async function processEvent(event, sportKey, sportLabel, markets) {
   };
 }
 
+async function processInBatches(items, batchSize, delayMs, fn) {
+  const results = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(fn));
+    results.push(...batchResults);
+    if (i + batchSize < items.length) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return results;
+}
+
 async function processSport({ sportKey, sportLabel, markets }) {
   const eventsUrl = `https://api.the-odds-api.com/v4/sports/${sportKey}/events?apiKey=${ODDS_API_KEY}`;
   const events = await fetchJSON(eventsUrl);
 
-  const results = await Promise.all(
-    events.map((event) => processEvent(event, sportKey, sportLabel, markets))
+  const results = await processInBatches(events, 4, 500, (event) =>
+    processEvent(event, sportKey, sportLabel, markets)
   );
 
   const sharpUpserts = results.reduce((sum, r) => sum + (r.sharpUpserts || 0), 0);
@@ -205,18 +218,16 @@ exports.handler = async function () {
   const allDebug = [];
   const errors = [];
 
-  const results = await Promise.allSettled(SPORTS_CONFIG.map((c) => processSport(c)));
-
-  results.forEach((result, i) => {
-    const sportLabel = SPORTS_CONFIG[i].sportLabel;
-    if (result.status === "fulfilled") {
-      totalSharp += result.value.sharpUpserts;
-      totalPP += result.value.ppUpserts;
-      allDebug.push({ sport: sportLabel, ...result.value.debug });
-    } else {
-      errors.push(`${sportLabel}: ${result.reason.message}`);
+  for (const config of SPORTS_CONFIG) {
+    try {
+      const result = await processSport(config);
+      totalSharp += result.sharpUpserts;
+      totalPP += result.ppUpserts;
+      allDebug.push({ sport: config.sportLabel, ...result.debug });
+    } catch (err) {
+      errors.push(`${config.sportLabel}: ${err.message}`);
     }
-  });
+  }
 
   return {
     statusCode: 200,
