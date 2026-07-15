@@ -66,7 +66,7 @@ const BOOK_PRIORITY = ["pinnacle", "fanduel", "draftkings"];
 function transformRows(rawProps) {
   const rows = [];
   for (const prop of rawProps) {
-    const ppLine = prop.pp_lines?.[0]?.pp_line;
+    const ppLine = prop.pp_lines?.pp_line;
     if (ppLine == null) continue;
     if (!prop.sportsbook_odds || prop.sportsbook_odds.length === 0) continue;
     let chosen = null;
