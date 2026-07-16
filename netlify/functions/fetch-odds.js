@@ -141,6 +141,7 @@ async function processEvent(event, sportKey, sportLabel, markets) {
                   player: playerName,
                   stat: STAT_LABELS[market.key] || market.key,
                   market_key: market.key,
+                  matchup: `${event.away_team} @ ${event.home_team}`,
                   commence_time: event.commence_time,
                   updated_at: new Date().toISOString(),
                 },
