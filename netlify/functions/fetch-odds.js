@@ -80,6 +80,28 @@ async function fetchJSON(url) {
   return res.json();
 }
 
+async function cleanupOldProps() {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: staleProps, error: findErr } = await supabase
+    .from("props")
+    .select("id")
+    .lt("commence_time", cutoff);
+
+  if (findErr || !staleProps || staleProps.length === 0) {
+    return { deleted: 0, error: findErr?.message || null };
+  }
+
+  const staleIds = staleProps.map((p) => p.id);
+
+  await supabase.from("pp_lines").delete().in("prop_id", staleIds);
+  await supabase.from("sportsbook_odds").delete().in("prop_id", staleIds);
+
+  const { error: deleteErr } = await supabase.from("props").delete().in("id", staleIds);
+
+  return { deleted: staleIds.length, error: deleteErr?.message || null };
+}
+
 async function processEvent(event, sportKey, sportLabel, markets) {
   const oddsUrl =
     `https://api.the-odds-api.com/v4/sports/${sportKey}/events/${event.id}/odds` +
@@ -213,6 +235,8 @@ async function processSport({ sportKey, sportLabel, markets }) {
 }
 
 exports.handler = async function () {
+  const cleanup = await cleanupOldProps();
+
   let totalSharp = 0;
   let totalPP = 0;
   const allDebug = [];
@@ -233,6 +257,7 @@ exports.handler = async function () {
     statusCode: 200,
     body: JSON.stringify({
       message: `Upserted ${totalSharp} sharp-book odds rows, ${totalPP} PrizePicks lines`,
+      cleanup,
       debug: allDebug,
       errors,
     }, null, 2),
