@@ -76,7 +76,7 @@ function transformRows(rawProps) {
   const rows = [];
 
   for (const prop of rawProps) {
-   const ppLineRaw = prop.pp_lines;
+    const ppLineRaw = prop.pp_lines;
     const ppLine = Array.isArray(ppLineRaw) ? ppLineRaw[0]?.pp_line : ppLineRaw?.pp_line;
     if (ppLine == null) continue;
     if (!prop.sportsbook_odds || prop.sportsbook_odds.length === 0) continue;
