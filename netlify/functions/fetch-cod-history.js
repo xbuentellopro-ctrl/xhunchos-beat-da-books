@@ -78,8 +78,11 @@ async function processTeam(teamSlug) {
       );
     } catch (err) {
       sampleErrors.push(err.message);
+      await new Promise((resolve) => setTimeout(resolve, 2000));
       continue;
     }
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
     const opponentSlug =
       match.team1?.slug === teamSlug ? match.team2?.slug : match.team1?.slug;
@@ -142,8 +145,8 @@ exports.handler = async function () {
   for (const teamSlug of TRACKED_TEAMS) {
     const result = await processTeam(teamSlug);
     results.push(result);
-    // small delay between teams to stay well under Cito's rate limit
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // longer delay between teams to fully respect Cito's rate limit
+    await new Promise((resolve) => setTimeout(resolve, 3000));
   }
 
   return {
