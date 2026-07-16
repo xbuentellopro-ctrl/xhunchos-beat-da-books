@@ -17,7 +17,7 @@ const TRACKED_TEAMS = [
   "g2-minnesota",
 ];
 
-const MATCHES_PER_TEAM = 8; // how far back to look per team, to conserve quota
+const MATCHES_PER_TEAM = 4; // reduced further to stay well under Cito's burst rate limit
 
 async function fetchJSON(url) {
   const res = await fetch(url, { headers: { "x-api-key": CITO_API_KEY } });
@@ -82,7 +82,7 @@ async function processTeam(teamSlug) {
       continue;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 3000));
 
     const opponentSlug =
       match.team1?.slug === teamSlug ? match.team2?.slug : match.team1?.slug;
@@ -146,7 +146,7 @@ exports.handler = async function () {
     const result = await processTeam(teamSlug);
     results.push(result);
     // longer delay between teams to fully respect Cito's rate limit
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await new Promise((resolve) => setTimeout(resolve, 5000));
   }
 
   return {
