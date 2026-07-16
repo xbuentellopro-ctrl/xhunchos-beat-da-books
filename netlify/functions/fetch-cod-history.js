@@ -42,9 +42,19 @@ async function processTeam(teamSlug) {
   const sampleErrors = [];
   let playersSeenTotal = 0;
   let matchesWithNoPlayers = 0;
+  let firstMatchDebug = null;
 
   for (const match of matches) {
     const matchId = match.matchId || match.id;
+
+    if (!firstMatchDebug) {
+      firstMatchDebug = {
+        hasMatchId: !!matchId,
+        matchIdValue: matchId || null,
+        matchKeys: Object.keys(match),
+      };
+    }
+
     if (!matchId) continue;
 
     const cacheCheck = await supabase
@@ -53,6 +63,11 @@ async function processTeam(teamSlug) {
       .eq("team_slug", teamSlug)
       .eq("match_id", matchId)
       .maybeSingle();
+
+    if (firstMatchDebug && firstMatchDebug.matchIdValue === matchId) {
+      firstMatchDebug.cacheCheckError = cacheCheck.error?.message || null;
+      firstMatchDebug.cacheHit = !!cacheCheck.data;
+    }
 
     if (cacheCheck.data) continue; // already cached, skip re-fetching to save quota
 
@@ -117,6 +132,7 @@ async function processTeam(teamSlug) {
     playersSeenTotal,
     matchesWithNoPlayers,
     mapRowsWritten,
+    firstMatchDebug,
     sampleErrors: sampleErrors.slice(0, 2),
   };
 }
