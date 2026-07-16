@@ -40,6 +40,8 @@ async function processTeam(teamSlug) {
   const matches = (matchesResp.data || []).slice(0, MATCHES_PER_TEAM);
   let mapRowsWritten = 0;
   const sampleErrors = [];
+  let playersSeenTotal = 0;
+  let matchesWithNoPlayers = 0;
 
   for (const match of matches) {
     const matchId = match.matchId || match.id;
@@ -74,6 +76,8 @@ async function processTeam(teamSlug) {
     );
 
     const playerRows = statsResp.data?.players || [];
+    playersSeenTotal += playerRows.length;
+    if (playerRows.length === 0) matchesWithNoPlayers++;
 
     for (const player of playerRows) {
       const citoPlayerId = player.playerId;
@@ -98,12 +102,23 @@ async function processTeam(teamSlug) {
           },
           { onConflict: "cito_player_id,match_id,map_number" }
         );
-        if (!error) mapRowsWritten++;
+        if (!error) {
+          mapRowsWritten++;
+        } else if (sampleErrors.length < 2) {
+          sampleErrors.push(error.message);
+        }
       }
     }
   }
 
-  return { teamSlug, matchesProcessed: matches.length, mapRowsWritten, sampleErrors: sampleErrors.slice(0, 2) };
+  return {
+    teamSlug,
+    matchesProcessed: matches.length,
+    playersSeenTotal,
+    matchesWithNoPlayers,
+    mapRowsWritten,
+    sampleErrors: sampleErrors.slice(0, 2),
+  };
 }
 
 exports.handler = async function () {
