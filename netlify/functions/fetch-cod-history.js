@@ -140,12 +140,15 @@ async function processTeam(teamSlug) {
   };
 }
 
-exports.handler = async function () {
+exports.handler = async function (event) {
+  const params = event.queryStringParameters || {};
+  const singleTeam = params.team;
+  const teamsToRun = singleTeam ? [singleTeam] : TRACKED_TEAMS;
+
   const results = [];
-  for (const teamSlug of TRACKED_TEAMS) {
+  for (const teamSlug of teamsToRun) {
     const result = await processTeam(teamSlug);
     results.push(result);
-    // longer delay between teams to fully respect Cito's rate limit
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
 
