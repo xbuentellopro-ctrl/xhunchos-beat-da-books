@@ -116,6 +116,7 @@ export default function EdgeBoard() {
   const [playType, setPlayType] = useState("flex");
   const [entrySize, setEntrySize] = useState(6);
   const [sportFilter, setSportFilter] = useState("ALL");
+  const [matchupFilter, setMatchupFilter] = useState("ALL");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("edge");
   const [sortDir, setSortDir] = useState("desc");
@@ -182,6 +183,7 @@ export default function EdgeBoard() {
     }));
 
     if (sportFilter !== "ALL") data = data.filter((p) => p.sport === sportFilter);
+    if (matchupFilter !== "ALL") data = data.filter((p) => p.matchup === matchupFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       data = data.filter((p) => p.player.toLowerCase().includes(q) || p.team.toLowerCase().includes(q));
@@ -199,7 +201,7 @@ export default function EdgeBoard() {
     });
 
     return data;
-  }, [baseRows, entrySize, sportFilter, search, sortKey, sortDir, playType]);
+  }, [baseRows, entrySize, sportFilter, matchupFilter, search, sortKey, sortDir, playType]);
 
   const topEdges = useMemo(
     () =>
@@ -226,6 +228,17 @@ export default function EdgeBoard() {
   };
 
   const sports = ["ALL", ...Array.from(new Set(baseRows.map((p) => p.sport)))];
+  const matchups = [
+    "ALL",
+    ...Array.from(
+      new Set(
+        baseRows
+          .filter((p) => sportFilter === "ALL" || p.sport === sportFilter)
+          .map((p) => p.matchup)
+          .filter(Boolean)
+      )
+    ),
+  ];
 
   return (
     <div
@@ -418,7 +431,10 @@ export default function EdgeBoard() {
         {sports.map((s) => (
           <button
             key={s}
-            onClick={() => setSportFilter(s)}
+            onClick={() => {
+              setSportFilter(s);
+              setMatchupFilter("ALL");
+            }}
             style={{
               padding: "7px 14px",
               borderRadius: 6,
@@ -434,6 +450,31 @@ export default function EdgeBoard() {
             {s}
           </button>
         ))}
+        <select
+          value={matchupFilter}
+          onChange={(e) => setMatchupFilter(e.target.value)}
+          className="mono"
+          style={{
+            background: "#12141A",
+            border: "1px solid rgba(201,162,75,0.25)",
+            borderRadius: 6,
+            padding: "7px 10px",
+            color: matchupFilter === "ALL" ? "#9A9689" : "#C9A24B",
+            fontSize: 12.5,
+            outline: "none",
+            cursor: "pointer",
+            maxWidth: 220,
+          }}
+        >
+          <option value="ALL">All Matchups</option>
+          {matchups
+            .filter((m) => m !== "ALL")
+            .map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+        </select>
         <span style={{ marginLeft: "auto", fontSize: 11.5, color: "#6B6858", display: "flex", alignItems: "center", gap: 6 }} className="mono">
           {loading && <Loader2 size={12} className="spin" />}
           {rows.length} props · breakeven {(BREAKEVEN[playType][entrySize] * 100).toFixed(2)}% at {entrySize}-pick {playType === "power" ? "Power" : "Flex"}
