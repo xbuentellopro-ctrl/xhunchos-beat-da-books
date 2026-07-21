@@ -5,3 +5,9 @@
 [[scheduled.functions]]
   function = "fetch-odds"
   cron = "0 14,20 * * *"
+
+# Runs hourly so closing-line snapshots for logged picks get captured close
+# to actual game time, not just whenever fetch-odds happens to run.
+[[scheduled.functions]]
+  function = "capture-closing-lines"
+  cron = "0 * * * *"
