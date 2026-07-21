@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { TrendingUp, TrendingDown, Search, ChevronUp, ChevronDown, Zap, Loader2 } from "lucide-react";
+import { TrendingUp, TrendingDown, Search, ChevronUp, ChevronDown, Zap, Loader2, BookMarked, Check } from "lucide-react";
+import MyPicks from "./MyPicks.jsx";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -102,6 +103,8 @@ function transformRows(rawProps) {
       matchup: prop.matchup || "",
       sport: prop.sport,
       stat: prop.stat,
+      marketKey: prop.market_key || null,
+      commenceTime: prop.commence_time,
       ppLine,
       side,
       bookNoVig,
@@ -112,7 +115,24 @@ function transformRows(rawProps) {
   return rows;
 }
 
+async function logPickApi(payload) {
+  const res = await fetch("/.netlify/functions/log-pick", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to log pick");
+  }
+  return res.json();
+}
+
 export default function EdgeBoard() {
+  const [view, setView] = useState("board"); // 'board' | 'picks'
+  const [loggedRowIds, setLoggedRowIds] = useState(() => new Set());
+  const [loggingId, setLoggingId] = useState(null);
+  const [logError, setLogError] = useState(null);
   const [playType, setPlayType] = useState("flex");
   const [entrySize, setEntrySize] = useState(6);
   const [sportFilter, setSportFilter] = useState("ALL");
@@ -140,7 +160,7 @@ export default function EdgeBoard() {
         .from("props")
         .select(
           `
-          id, player, team, sport, stat, matchup, commence_time,
+          id, player, team, sport, stat, matchup, commence_time, market_key,
           pp_lines ( pp_line ),
           sportsbook_odds ( bookmaker, over_fair_prob, under_fair_prob )
         `
@@ -216,6 +236,35 @@ export default function EdgeBoard() {
     setPlayType(type);
     if (type === "power" && ![2, 3, 4, 5, 6].includes(entrySize)) setEntrySize(2);
     if (type === "flex" && ![3, 4, 5, 6].includes(entrySize)) setEntrySize(6);
+  };
+
+  const handleLogPick = async (p) => {
+    setLoggingId(p.id);
+    setLogError(null);
+    try {
+      await logPickApi({
+        propId: p.id,
+        player: p.player,
+        team: p.team,
+        matchup: p.matchup,
+        sport: p.sport,
+        stat: p.stat,
+        marketKey: p.marketKey,
+        side: p.side,
+        ppLine: p.ppLine,
+        book: p.book.toLowerCase(),
+        openProb: p.bookNoVig,
+        openEdge: p.edge,
+        playType,
+        entrySize,
+        commenceTime: p.commenceTime,
+      });
+      setLoggedRowIds((prev) => new Set(prev).add(p.id));
+    } catch (err) {
+      setLogError(err.message);
+    } finally {
+      setLoggingId(null);
+    }
   };
 
   const toggleSort = (key) => {
@@ -315,17 +364,17 @@ export default function EdgeBoard() {
 
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {["power", "flex"].map((t) => (
+              {["board", "picks"].map((v) => (
                 <button
-                  key={t}
-                  onClick={() => handlePlayType(t)}
+                  key={v}
+                  onClick={() => setView(v)}
                   className="oswald"
                   style={{
                     padding: "6px 13px",
                     borderRadius: 5,
-                    border: playType === t ? "1px solid #C9A24B" : "1px solid rgba(201,162,75,0.25)",
-                    background: playType === t ? "rgba(201,162,75,0.15)" : "transparent",
-                    color: playType === t ? "#C9A24B" : "#9A9689",
+                    border: view === v ? "1px solid #C9A24B" : "1px solid rgba(201,162,75,0.25)",
+                    background: view === v ? "rgba(201,162,75,0.15)" : "transparent",
+                    color: view === v ? "#C9A24B" : "#9A9689",
                     fontWeight: 600,
                     fontSize: 12,
                     letterSpacing: 0.6,
@@ -333,38 +382,69 @@ export default function EdgeBoard() {
                     cursor: "pointer",
                   }}
                 >
-                  {t === "power" ? "Power Play" : "Flex Play"}
+                  {v === "board" ? "Edge Board" : "My Picks"}
                 </button>
               ))}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 11, color: "#9A9689", textTransform: "uppercase", letterSpacing: 0.5 }}>Picks</span>
-              {availableSizes.map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setEntrySize(n)}
-                  className="mono"
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 5,
-                    border: entrySize === n ? "1px solid #C9A24B" : "1px solid rgba(201,162,75,0.25)",
-                    background: entrySize === n ? "rgba(201,162,75,0.15)" : "transparent",
-                    color: entrySize === n ? "#C9A24B" : "#9A9689",
-                    fontWeight: 600,
-                    fontSize: 13,
-                    cursor: "pointer",
-                    transition: "all 0.15s",
-                  }}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
+            {view === "board" && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {["power", "flex"].map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => handlePlayType(t)}
+                      className="oswald"
+                      style={{
+                        padding: "6px 13px",
+                        borderRadius: 5,
+                        border: playType === t ? "1px solid #C9A24B" : "1px solid rgba(201,162,75,0.25)",
+                        background: playType === t ? "rgba(201,162,75,0.15)" : "transparent",
+                        color: playType === t ? "#C9A24B" : "#9A9689",
+                        fontWeight: 600,
+                        fontSize: 12,
+                        letterSpacing: 0.6,
+                        textTransform: "uppercase",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {t === "power" ? "Power Play" : "Flex Play"}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: "#9A9689", textTransform: "uppercase", letterSpacing: 0.5 }}>Picks</span>
+                  {availableSizes.map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => setEntrySize(n)}
+                      className="mono"
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 5,
+                        border: entrySize === n ? "1px solid #C9A24B" : "1px solid rgba(201,162,75,0.25)",
+                        background: entrySize === n ? "rgba(201,162,75,0.15)" : "transparent",
+                        color: entrySize === n ? "#C9A24B" : "#9A9689",
+                        fontWeight: 600,
+                        fontSize: 13,
+                        cursor: "pointer",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </header>
 
+      {view === "picks" ? (
+        <MyPicks />
+      ) : (
+        <>
       {/* Ticker */}
       <div
         style={{
@@ -499,6 +579,21 @@ export default function EdgeBoard() {
             Couldn't load live props: {loadError}
           </div>
         )}
+        {logError && (
+          <div
+            style={{
+              background: "rgba(229,72,77,0.1)",
+              border: "1px solid rgba(229,72,77,0.3)",
+              borderRadius: 8,
+              padding: "12px 16px",
+              marginBottom: 14,
+              fontSize: 13,
+              color: "#E5484D",
+            }}
+          >
+            Couldn't log pick: {logError}
+          </div>
+        )}
 
         <div className="felt-border" style={{ borderRadius: 10, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -539,6 +634,20 @@ export default function EdgeBoard() {
                     </span>
                   </th>
                 ))}
+                <th
+                  className="oswald"
+                  style={{
+                    padding: "12px 16px",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    letterSpacing: 0.8,
+                    textTransform: "uppercase",
+                    color: "#9A9689",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Log
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -601,11 +710,44 @@ export default function EdgeBoard() {
                     {p.edge >= 0 ? "+" : ""}
                     {p.edge.toFixed(1)}%
                   </td>
+                  <td style={{ padding: "13px 16px" }}>
+                    {loggedRowIds.has(p.id) ? (
+                      <span
+                        className="mono"
+                        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "#3ECF8E" }}
+                      >
+                        <Check size={12} /> Logged
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleLogPick(p)}
+                        disabled={loggingId === p.id}
+                        className="mono"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          padding: "5px 10px",
+                          borderRadius: 5,
+                          border: "1px solid rgba(201,162,75,0.35)",
+                          background: "transparent",
+                          color: "#C9A24B",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: loggingId === p.id ? "default" : "pointer",
+                          opacity: loggingId === p.id ? 0.5 : 1,
+                        }}
+                      >
+                        {loggingId === p.id ? <Loader2 size={11} className="spin" /> : <BookMarked size={11} />}
+                        Log
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
               {rows.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={9} style={{ padding: 32, textAlign: "center", color: "#6B6858", fontSize: 13 }}>
+                  <td colSpan={10} style={{ padding: 32, textAlign: "center", color: "#6B6858", fontSize: 13 }}>
                     No props match these filters yet. Sharp books often post lines closer to game time —
                     check back nearer to first pitch/tip-off.
                   </td>
@@ -613,7 +755,7 @@ export default function EdgeBoard() {
               )}
               {loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={9} style={{ padding: 32, textAlign: "center", color: "#6B6858", fontSize: 13 }}>
+                  <td colSpan={10} style={{ padding: 32, textAlign: "center", color: "#6B6858", fontSize: 13 }}>
                     Loading live props from Supabase...
                   </td>
                 </tr>
@@ -629,6 +771,8 @@ export default function EdgeBoard() {
           breakeven win rate required per leg at the selected play type and entry size.
         </p>
       </div>
+        </>
+      )}
     </div>
   );
 }
