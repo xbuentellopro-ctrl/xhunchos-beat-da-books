@@ -177,6 +177,19 @@ exports.handler = async function () {
     propsBySport[sport] = data || [];
   }
 
+  // Only props with an actual PrizePicks line are worth spending a batch
+  // slot on -- filtering this BEFORE batch selection (not after) matters a
+  // lot for WNBA: without it, "never attempted" prioritization can fill an
+  // entire batch with props that don't have a PP line yet, silently skip
+  // every one of them, and waste the whole run doing nothing.
+  function hasPpLine(prop) {
+    const raw = prop.pp_lines;
+    const line = Array.isArray(raw) ? raw[0]?.pp_line : raw?.pp_line;
+    return line != null;
+  }
+  propsBySport.MLB = propsBySport.MLB.filter(hasPpLine);
+  propsBySport.WNBA = propsBySport.WNBA.filter(hasPpLine);
+
   // Skip props that already have a successful projection -- no need to
   // re-spend rate-limited WNBA calls re-computing something already done.
   const { data: existingProjections } = await supabase
