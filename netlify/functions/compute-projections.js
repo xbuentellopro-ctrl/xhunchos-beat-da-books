@@ -145,6 +145,13 @@ async function processWnbaProp(prop) {
 
 // -- main handler -------------------------------------------------------
 
+// WNBA on the BallDontLie 48-hour trial is capped at 5 req/min -- far too
+// low to process a full slate in one invocation, and too slow (at ~12.5s
+// per request) to risk a large batch running into Netlify's function
+// execution time limit. Keep this small; it'll take many runs to cover a
+// full slate on the trial. Raise it once on a real paid plan.
+const WNBA_BATCH_LIMIT = 4;
+
 exports.handler = async function () {
   const now = new Date().toISOString();
 
@@ -169,6 +176,19 @@ exports.handler = async function () {
     }
     propsBySport[sport] = data || [];
   }
+
+  // Skip props that already have a successful projection -- no need to
+  // re-spend rate-limited WNBA calls re-computing something already done.
+  // Props with a prior error (rate-limited, not-found, etc.) are retried.
+  const { data: alreadyProjected } = await supabase
+    .from("stat_projections")
+    .select("prop_id")
+    .is("error", null)
+    .not("model_prob_over", "is", null);
+  const doneIds = new Set((alreadyProjected || []).map((r) => r.prop_id));
+
+  propsBySport.MLB = propsBySport.MLB.filter((p) => !doneIds.has(p.id));
+  propsBySport.WNBA = propsBySport.WNBA.filter((p) => !doneIds.has(p.id)).slice(0, WNBA_BATCH_LIMIT);
 
   const props = [...propsBySport.MLB, ...propsBySport.WNBA];
 
@@ -231,6 +251,7 @@ exports.handler = async function () {
           MLB: propsBySport.MLB.length,
           WNBA: propsBySport.WNBA.length,
         },
+        note: `WNBA is capped at ${WNBA_BATCH_LIMIT} new props per run on the BallDontLie trial's rate limit -- run this again (or wait for the next cron cycle) to cover more of the slate.`,
         sampleErrors: errors.slice(0, 10),
       },
       null,
