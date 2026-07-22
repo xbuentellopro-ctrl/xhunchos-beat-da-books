@@ -96,6 +96,10 @@ function transformRows(rawProps) {
     const side = overProb >= underProb ? "Over" : "Under";
     const bookNoVig = side === "Over" ? overProb : underProb;
 
+    const projRaw = prop.stat_projections;
+    const proj = Array.isArray(projRaw) ? projRaw[0] : projRaw;
+    const modelProb = proj && !proj.error ? (side === "Over" ? proj.model_prob_over : proj.model_prob_under) : null;
+
     rows.push({
       id: prop.id,
       player: prop.player,
@@ -109,6 +113,8 @@ function transformRows(rawProps) {
       side,
       bookNoVig,
       book: chosen.bookmaker.charAt(0).toUpperCase() + chosen.bookmaker.slice(1),
+      modelProb,
+      modelSampleSize: proj?.sample_size ?? null,
     });
   }
 
@@ -162,7 +168,8 @@ export default function EdgeBoard() {
           `
           id, player, team, sport, stat, matchup, commence_time, market_key,
           pp_lines ( pp_line ),
-          sportsbook_odds ( bookmaker, over_fair_prob, under_fair_prob )
+          sportsbook_odds ( bookmaker, over_fair_prob, under_fair_prob ),
+          stat_projections ( model_prob_over, model_prob_under, sample_size, error )
         `
         )
         .gte("commence_time", startOfDay.toISOString())
@@ -197,10 +204,12 @@ export default function EdgeBoard() {
   const availableSizes = playType === "power" ? [2, 3, 4, 5, 6] : [3, 4, 5, 6];
 
   const rows = useMemo(() => {
-    let data = baseRows.map((p) => ({
-      ...p,
-      edge: calcEdge(p.bookNoVig, entrySize, playType),
-    }));
+    let data = baseRows.map((p) => {
+      const edge = calcEdge(p.bookNoVig, entrySize, playType);
+      const modelEdge = p.modelProb != null ? calcEdge(p.modelProb, entrySize, playType) : null;
+      const confluence = modelEdge != null && edge >= 0 && modelEdge >= 0;
+      return { ...p, edge, modelEdge, confluence };
+    });
 
     if (sportFilter !== "ALL") data = data.filter((p) => p.sport === sportFilter);
     if (matchupFilter !== "ALL") data = data.filter((p) => p.matchup === matchupFilter);
@@ -608,6 +617,8 @@ export default function EdgeBoard() {
                   { key: "side", label: "Side" },
                   { key: "bookNoVig", label: "Fair %" },
                   { key: "book", label: "Source" },
+                  { key: "modelProb", label: "Model %" },
+                  { key: "modelEdge", label: "Model Edge" },
                   { key: "edge", label: "Edge" },
                 ].map((col) => (
                   <th
@@ -697,6 +708,25 @@ export default function EdgeBoard() {
                     {(p.bookNoVig * 100).toFixed(1)}%
                   </td>
                   <td style={{ padding: "13px 16px", fontSize: 12, color: "#6B6858" }}>{p.book}</td>
+                  <td className="mono" style={{ padding: "13px 16px", fontSize: 13, color: p.modelProb != null ? "#C4C0B4" : "#4A4738" }}>
+                    {p.modelProb != null ? `${(p.modelProb * 100).toFixed(1)}%` : "—"}
+                    {p.modelSampleSize != null && (
+                      <span style={{ fontSize: 10, color: "#6B6858", marginLeft: 4 }}>
+                        (n={p.modelSampleSize})
+                      </span>
+                    )}
+                  </td>
+                  <td
+                    className="mono"
+                    style={{
+                      padding: "13px 16px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: p.modelEdge == null ? "#4A4738" : p.modelEdge >= 0 ? "#3ECF8E" : "#E5484D",
+                    }}
+                  >
+                    {p.modelEdge != null ? `${p.modelEdge >= 0 ? "+" : ""}${p.modelEdge.toFixed(1)}%` : "—"}
+                  </td>
                   <td
                     className={`mono ${p.edge >= 0 ? "led-glow-pos" : "led-glow-neg"}`}
                     style={{
@@ -709,6 +739,14 @@ export default function EdgeBoard() {
                   >
                     {p.edge >= 0 ? "+" : ""}
                     {p.edge.toFixed(1)}%
+                    {p.confluence && (
+                      <span
+                        title="Market and stats model both favor this side"
+                        style={{ marginLeft: 6, fontSize: 10, color: "#C9A24B" }}
+                      >
+                        ★
+                      </span>
+                    )}
                   </td>
                   <td style={{ padding: "13px 16px" }}>
                     {loggedRowIds.has(p.id) ? (
@@ -747,7 +785,7 @@ export default function EdgeBoard() {
               ))}
               {rows.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={10} style={{ padding: 32, textAlign: "center", color: "#6B6858", fontSize: 13 }}>
+                  <td colSpan={12} style={{ padding: 32, textAlign: "center", color: "#6B6858", fontSize: 13 }}>
                     No props match these filters yet. Sharp books often post lines closer to game time —
                     check back nearer to first pitch/tip-off.
                   </td>
@@ -755,7 +793,7 @@ export default function EdgeBoard() {
               )}
               {loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={10} style={{ padding: 32, textAlign: "center", color: "#6B6858", fontSize: 13 }}>
+                  <td colSpan={12} style={{ padding: 32, textAlign: "center", color: "#6B6858", fontSize: 13 }}>
                     Loading live props from Supabase...
                   </td>
                 </tr>
