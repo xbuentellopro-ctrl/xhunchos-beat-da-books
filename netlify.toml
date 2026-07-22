@@ -11,3 +11,9 @@
 [[scheduled.functions]]
   function = "capture-closing-lines"
   cron = "0 * * * *"
+
+# Runs 30 min after each fetch-odds cycle so today's props exist before the
+# stats model tries to project them.
+[[scheduled.functions]]
+  function = "compute-projections"
+  cron = "30 14,20 * * *"
