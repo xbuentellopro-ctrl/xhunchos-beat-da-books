@@ -61,9 +61,9 @@ async function bdlFetch(path, params = {}) {
       continue;
     }
 
-    if (!res.ok) {
+ if (!res.ok) {
       const body = await res.text();
-      throw new Error(`BallDontLie error ${res.status}: ${body}`);
+      throw new Error(`BallDontLie error ${res.status} on ${path}: ${body}`);
     }
 
     return res.json();
