@@ -150,16 +150,27 @@ exports.handler = async function () {
 
   // Only project props for upcoming games that actually have a PrizePicks
   // line -- no point modeling something that isn't a live pick opportunity.
-  const { data: props, error: propsErr } = await supabase
-    .from("props")
-    .select("id, player, sport, stat, matchup, market_key, commence_time, pp_lines ( pp_line )")
-    .gte("commence_time", now)
-    .in("sport", ["MLB", "WNBA"])
-    .limit(300);
+  // Query each sport separately (not combined with a shared limit): MLB
+  // generates far more prop rows per day than WNBA, so a single combined
+  // query with one limit can fill entirely with MLB rows before WNBA is
+  // ever read. Separate queries guarantee WNBA gets its own slice.
+  const propsBySport = {};
+  for (const sport of ["MLB", "WNBA"]) {
+    const { data, error } = await supabase
+      .from("props")
+      .select("id, player, sport, stat, matchup, market_key, commence_time, pp_lines ( pp_line )")
+      .gte("commence_time", now)
+      .eq("sport", sport)
+      .order("commence_time", { ascending: true })
+      .limit(200);
 
-  if (propsErr) {
-    return { statusCode: 500, body: JSON.stringify({ error: propsErr.message }) };
+    if (error) {
+      return { statusCode: 500, body: JSON.stringify({ error: `${sport}: ${error.message}` }) };
+    }
+    propsBySport[sport] = data || [];
   }
+
+  const props = [...propsBySport.MLB, ...propsBySport.WNBA];
 
   let processed = 0;
   let errors = [];
@@ -216,7 +227,10 @@ exports.handler = async function () {
     body: JSON.stringify(
       {
         message: `Computed ${processed} projections, ${errors.length} errors`,
-        propsConsidered: (props || []).length,
+        propsConsidered: {
+          MLB: propsBySport.MLB.length,
+          WNBA: propsBySport.WNBA.length,
+        },
         sampleErrors: errors.slice(0, 10),
       },
       null,
