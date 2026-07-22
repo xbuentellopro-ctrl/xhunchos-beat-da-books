@@ -179,16 +179,34 @@ exports.handler = async function () {
 
   // Skip props that already have a successful projection -- no need to
   // re-spend rate-limited WNBA calls re-computing something already done.
-  // Props with a prior error (rate-limited, not-found, etc.) are retried.
-  const { data: alreadyProjected } = await supabase
+  const { data: existingProjections } = await supabase
     .from("stat_projections")
-    .select("prop_id")
-    .is("error", null)
-    .not("model_prob_over", "is", null);
-  const doneIds = new Set((alreadyProjected || []).map((r) => r.prop_id));
+    .select("prop_id, error, computed_at");
 
-  propsBySport.MLB = propsBySport.MLB.filter((p) => !doneIds.has(p.id));
-  propsBySport.WNBA = propsBySport.WNBA.filter((p) => !doneIds.has(p.id)).slice(0, WNBA_BATCH_LIMIT);
+  const successIds = new Set();
+  const errorAttempts = new Map(); // prop_id -> computed_at, for props that have only ever errored
+  for (const row of existingProjections || []) {
+    if (row.error == null) {
+      successIds.add(row.prop_id);
+    } else if (!successIds.has(row.prop_id)) {
+      errorAttempts.set(row.prop_id, row.computed_at);
+    }
+  }
+
+  propsBySport.MLB = propsBySport.MLB.filter((p) => !successIds.has(p.id));
+
+  // For WNBA specifically: prioritize props that have NEVER been attempted
+  // over ones that have only ever failed (rate-limited, not-found, etc.).
+  // Without this, a batch ordered purely by game time gets stuck re-picking
+  // the same earliest-game props every run if they keep erroring, and never
+  // reaches fresh players further down the list.
+  const wnbaCandidates = propsBySport.WNBA.filter((p) => !successIds.has(p.id));
+  const neverAttempted = wnbaCandidates.filter((p) => !errorAttempts.has(p.id));
+  const previouslyErrored = wnbaCandidates
+    .filter((p) => errorAttempts.has(p.id))
+    .sort((a, b) => new Date(errorAttempts.get(a.id)) - new Date(errorAttempts.get(b.id)));
+
+  propsBySport.WNBA = [...neverAttempted, ...previouslyErrored].slice(0, WNBA_BATCH_LIMIT);
 
   const props = [...propsBySport.MLB, ...propsBySport.WNBA];
 
