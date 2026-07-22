@@ -1,5 +1,6 @@
 const { createClient } = require("@supabase/supabase-js");
 const { devigTwoWay } = require("./devig");
+const { captureClosingLines } = require("./capture-closing-lines");
 
 const ODDS_API_KEY = process.env.ODDS_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -236,6 +237,10 @@ async function processSport({ sportKey, sportLabel, markets }) {
 }
 
 exports.handler = async function () {
+  // Capture closing lines for any logged picks whose games have started,
+  // BEFORE cleanup deletes the props/odds rows those picks reference.
+  const closingLines = await captureClosingLines();
+
   const cleanup = await cleanupOldProps();
 
   let totalSharp = 0;
@@ -258,6 +263,7 @@ exports.handler = async function () {
     statusCode: 200,
     body: JSON.stringify({
       message: `Upserted ${totalSharp} sharp-book odds rows, ${totalPP} PrizePicks lines`,
+      closingLines,
       cleanup,
       debug: allDebug,
       errors,
