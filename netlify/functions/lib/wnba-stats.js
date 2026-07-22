@@ -25,6 +25,19 @@ const MARKET_TO_OPPONENT_STAT = {
   player_threes: "fg3m",
 };
 
+// Minimum gap enforced between outgoing BDL requests, and retry behavior for
+// rate-limit (429) responses. ALL-STAR tier is 60 req/min (~1/sec); this
+// paces requests to stay safely under that. It will NOT help on the 5 req/min
+// 48-hour trial tier -- that cap is too low for a multi-prop batch job
+// regardless of pacing, and is expected to resolve once on a real paid plan.
+const MIN_REQUEST_GAP_MS = 1100;
+const MAX_RETRIES = 3;
+let lastRequestAt = 0;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function bdlFetch(path, params = {}) {
   const url = new URL(`${BDL_BASE}${path}`);
   for (const [key, value] of Object.entries(params)) {
@@ -34,12 +47,27 @@ async function bdlFetch(path, params = {}) {
       url.searchParams.set(key, value);
     }
   }
-  const res = await fetch(url.toString(), { headers: { Authorization: BDL_API_KEY } });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`BallDontLie error ${res.status}: ${body}`);
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const sinceLast = Date.now() - lastRequestAt;
+    if (sinceLast < MIN_REQUEST_GAP_MS) await sleep(MIN_REQUEST_GAP_MS - sinceLast);
+    lastRequestAt = Date.now();
+
+    const res = await fetch(url.toString(), { headers: { Authorization: BDL_API_KEY } });
+
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      const retryAfter = Number(res.headers.get("retry-after")) || 2 ** attempt * 2;
+      await sleep(retryAfter * 1000);
+      continue;
+    }
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`BallDontLie error ${res.status}: ${body}`);
+    }
+
+    return res.json();
   }
-  return res.json();
 }
 
 let teamsCache = null;
@@ -106,7 +134,11 @@ async function getLeagueAverageOpponentStat(statField) {
   return avg;
 }
 
+let teamStatCache = {};
 async function getTeamOpponentStat(teamId, statField) {
+  const cacheKey = `${teamId}:${statField}`;
+  if (teamStatCache[cacheKey] !== undefined) return teamStatCache[cacheKey];
+
   const data = await bdlFetch("/team_season_averages/general", {
     season: SEASON,
     season_type: "regular",
@@ -114,7 +146,9 @@ async function getTeamOpponentStat(teamId, statField) {
     team_ids: [teamId],
   });
   const row = (data.data || [])[0];
-  return row?.stats?.[statField] != null ? Number(row.stats[statField]) : null;
+  const value = row?.stats?.[statField] != null ? Number(row.stats[statField]) : null;
+  teamStatCache[cacheKey] = value;
+  return value;
 }
 
 module.exports = {
