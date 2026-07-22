@@ -90,12 +90,26 @@ async function findTeamByName(name) {
 }
 
 async function findPlayer(playerName) {
-  const data = await bdlFetch("/players", { search: playerName, per_page: 5 });
+  const nameParts = playerName.trim().split(/\s+/);
+  const lastName = nameParts[nameParts.length - 1];
+
+  // BDL's `search` param matches players whose first OR last name CONTAINS
+  // the value -- searching the full "First Last" string as one token never
+  // matches, since it isn't a substring of either individual field. Search
+  // on last name (more distinctive, less likely to over-match) and confirm
+  // with a full-name comparison against the candidates.
+  const data = await bdlFetch("/players", { search: lastName, per_page: 25 });
   const players = data.data || [];
   if (players.length === 0) return null;
+
   const full = (p) => `${p.first_name} ${p.last_name}`.toLowerCase();
   const exact = players.find((p) => full(p) === playerName.toLowerCase());
-  return exact || players[0];
+  if (exact) return exact;
+
+  // Fall back to a last-name-only match if the full name didn't line up
+  // exactly (nicknames, suffixes, etc.)
+  const lastNameMatch = players.find((p) => p.last_name?.toLowerCase() === lastName.toLowerCase());
+  return lastNameMatch || players[0];
 }
 
 /**
