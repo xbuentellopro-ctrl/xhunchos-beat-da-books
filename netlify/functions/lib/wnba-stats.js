@@ -26,11 +26,11 @@ const MARKET_TO_OPPONENT_STAT = {
 };
 
 // Minimum gap enforced between outgoing BDL requests, and retry behavior for
-// rate-limit (429) responses. ALL-STAR tier is 60 req/min (~1/sec); this
-// paces requests to stay safely under that. It will NOT help on the 5 req/min
-// 48-hour trial tier -- that cap is too low for a multi-prop batch job
-// regardless of pacing, and is expected to resolve once on a real paid plan.
-const MIN_REQUEST_GAP_MS = 1100;
+// rate-limit (429) responses. Default here is tuned for the 48-hour trial's
+// 5 req/min cap (12.5s between requests). Once on a real paid plan (e.g.
+// ALL-STAR at 60 req/min), set BALLDONTLIE_MIN_GAP_MS=1100 in Netlify's env
+// vars to speed this up roughly 10x.
+const MIN_REQUEST_GAP_MS = Number(process.env.BALLDONTLIE_MIN_GAP_MS) || 12500;
 const MAX_RETRIES = 3;
 let lastRequestAt = 0;
 
